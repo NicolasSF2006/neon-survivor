@@ -1,0 +1,35 @@
+node_modules/
+dist/
+.DS_Store
+.env
+.env.*
+!.env.example
+*.log
+
+# Local deployment metadata, caches and generated checks
+.vercel/
+.vite/
+.cache/
+coverage/
+*.tsbuildinfo
+playwright-report/
+test-results/
+
+# Temporary files and operating-system metadata
+tmp/
+temp/
+*.tmp
+*.temp
+*.bak
+*.swp
+*.swo
+*~
+Thumbs.db
+
+# Local authentication and private keys
+.npmrc
+.netrc
+*.pem
+*.key
+*.p12
+*.pfx
