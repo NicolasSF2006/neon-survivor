@@ -89,6 +89,12 @@ O fundo escuro mantém três camadas de estrelas pixeladas: distantes com um pix
 
 São 70 gráficos fixos que reutilizam os três contextos de estrelas existentes. Quando o menor lado da viewport é de até 600 px, apenas 40 ficam visíveis e a deriva cai para 75% da velocidade. Redimensionar remapeia as posições e alterna a visibilidade do mesmo conjunto, sem recriar recursos. As estrelas continuam congeladas durante pausa e Game Over; não há grade, nebulosas, blur ou novas dependências. A desmontagem libera as camadas com a cena e os contextos com `PixelArt`.
 
+### Feedback de combate
+
+`CombatEffects.ts` concentra o polimento visual: projéteis com rastro curto integrado ao mapa de pixels, flash de boca de disparo de 70 ms, impacto de 120 ms e burst de destruição de 220 ms acompanhado de pequenas faíscas e dos fragmentos existentes. O dano acrescenta uma tonalidade breve no corpo da nave e um burst discreto, preservando a piscada e os 1,5 segundos de invulnerabilidade. Meteoros deixam poeira curta atrás dos atores. O início e a troca de ondas exibem uma legenda pixelada por 1,15 segundo, abaixo do HUD, sem interromper a partida.
+
+As geometrias de flashes e letras são compartilhadas. Os novos efeitos reutilizam 80 gráficos pré-alocados, com orçamento de 40 ativos em telas pequenas e capacidade reservada para feedback de combate separada da poeira. O sorteio visual é independente do `Math.random` usado pelo jogo. A animação usa delta time, congela em pausa/Game Over e é limpa ao reiniciar; o resize remapeia somente as posições visuais. A geometria e os objetos do pool são liberados junto com a cena. Não há filtros de blur, listeners ou timers adicionais, nem dependências novas.
+
 ### Mira, disparos e joysticks
 
 A engine converte a posição do cursor de coordenadas CSS para coordenadas do mundo usando o retângulo atual do canvas, as dimensões lógicas do renderer e a escala do mundo. Isso também considera o arredondamento do buffer pelo DPR. O ângulo é `atan2(alvoY - naveY, alvoX - naveX)`; a rotação visual adiciona `π/2`, pois o desenho original aponta para cima. Se o cursor coincide com o centro da nave, a direção anterior é mantida. A mira é recalculada depois da movimentação, inclusive com o cursor parado.
@@ -124,6 +130,7 @@ src/
   components/VirtualJoystick.tsx Controles analógicos de toque
   game/GameEngine.ts        Renderização e lógica do jogo
   game/PixelArt.ts          Mapas de pixels, geometria compartilhada e animação visual
+  game/CombatEffects.ts     Feedback visual de combate, rastros e avisos de ondas
   game/math.ts              Matemática e colisões
   game/JoystickInput.ts     Ponteiro proprietário, zona morta e vetores analógicos
   game/viewport.ts          Dimensões lógicas, escala uniforme e limite de DPR
@@ -136,6 +143,7 @@ tests/engine.test.mjs       Resize/colisões, pausa, input, Game Over e snapshot
 tests/joystick.test.mjs     Dois ponteiros, zona morta, isolamento e liberação
 tests/pixel-art.test.mjs    Reuso de geometria, pivô estável e liberação de recursos
 tests/starfield.test.mjs    Camadas, delta time, reciclagem e ciclo de vida das estrelas
+tests/combat-effects.test.mjs Pool, delta time, orçamento mobile, avisos e limpeza dos efeitos
 vercel.json                Framework, instalação, build e saída para a Vercel
 docs/ARQUITETURA.md         Explicação para entrevista
 docs/PUBLICACAO.md          Preparação, autenticação e validação da publicação

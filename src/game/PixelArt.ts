@@ -1,6 +1,7 @@
 import { Container, Graphics, GraphicsContext } from 'pixi.js';
 
 type Palette = Record<string, number>;
+export type CombatGraphic = 'muzzle' | 'impact' | 'burst' | 'damage' | 'spark' | 'dust';
 
 /** Presentation only: collision radii remain in the engine's logical units. */
 export const ACTOR_VISUAL_SCALE = 1.25;
@@ -46,6 +47,30 @@ const FLAMES = [
   ['vbcbv', 'bchcb', 'bcb', 'b'],
 ];
 
+// Small fixed bitmap alphabet: wave announcements need no fonts or text textures.
+const GLYPHS: Record<string, string[]> = {
+  O: ['.www.', 'w...w', 'w...w', 'w...w', 'w...w', 'w...w', '.www.'],
+  N: ['w...w', 'ww..w', 'ww..w', 'w.w.w', 'w..ww', 'w..ww', 'w...w'],
+  D: ['wwww.', 'w...w', 'w...w', 'w...w', 'w...w', 'w...w', 'wwww.'],
+  A: ['.www.', 'w...w', 'w...w', 'wwwww', 'w...w', 'w...w', 'w...w'],
+  0: ['.www.', 'w...w', 'w..ww', 'w.w.w', 'ww..w', 'w...w', '.www.'],
+  1: ['..w..', '.ww..', '..w..', '..w..', '..w..', '..w..', '.www.'],
+  2: ['.www.', 'w...w', '....w', '...w.', '..w..', '.w...', 'wwwww'],
+  3: ['wwww.', '....w', '....w', '.www.', '....w', '....w', 'wwww.'],
+  4: ['...w.', '..ww.', '.w.w.', 'w..w.', 'wwwww', '...w.', '...w.'],
+  5: ['wwwww', 'w....', 'w....', 'wwww.', '....w', '....w', 'wwww.'],
+  6: ['.www.', 'w....', 'w....', 'wwww.', 'w...w', 'w...w', '.www.'],
+  7: ['wwwww', '....w', '...w.', '..w..', '.w...', '.w...', '.w...'],
+  8: ['.www.', 'w...w', 'w...w', '.www.', 'w...w', 'w...w', '.www.'],
+  9: ['.www.', 'w...w', 'w...w', '.wwww', '....w', '....w', '.www.'],
+};
+
+function lettering(text: string) {
+  return Array.from({ length: 7 }, (_, y) => [...text].map(letter => GLYPHS[letter][y]).join('.'));
+}
+
+const COMBAT_PALETTE = { h: 0xedfcff, c: 0x72e8ff, b: 0x578bdf, v: 0x9b73e5, m: 0xf485cf };
+
 /** Three deterministic silhouettes/crater patterns; gameplay randomness is unchanged. */
 function meteorMap(variant: number) {
   const radii = [[8, 7, 8, 7, 8, 8, 7, 8], [7, 8, 7, 8, 8, 7, 8, 8], [8, 8, 7, 7, 8, 7, 8, 7]][variant];
@@ -80,7 +105,17 @@ export class PixelArt {
     pixelMap(meteorMap(1), { o: 0x52294f, d: 0x823b79, b: 0xb95396, l: 0xe987c5, h: 0xffcce9, m: 0xb297fa }, 2),
     pixelMap(meteorMap(2), { o: 0x30386c, d: 0x4c508c, b: 0x7774b8, l: 0xa6aae4, h: 0xd8e9ff, m: 0xe183cf }, 2),
   ];
-  private bolt = pixelMap(['..h..', '.chc.', '.chc.', '.chc.', '.ccc.', '.ccc.', '..c..', '..c..', '..b..', '..b..', '..g..', '..g..'], { h: 0xf0fdff, c: 0x78eaff, b: 0x3a8ebd, g: 0x173552 }, 2);
+  private bolt = pixelMap(['..h..', '.chc.', '.bhb.', '.ccc.', '..c..', '.bcb.', '..b..', '.g.g.', '..g..', '..g..'], { h: 0xf0fdff, c: 0x78eaff, b: 0x3a8ebd, g: 0x173552 }, 2);
+  private combat = {
+    muzzle: pixelMap(['..c..', '.chc.', 'bhhhb', '.chc.', '..b..'], COMBAT_PALETTE, 2),
+    impact: pixelMap(['..c..', '.b.b.', 'chhhc', '.b.b.', '..c..'], COMBAT_PALETTE, 2),
+    burst: pixelMap(['....c....', '..b...b..', '.v..m..v.', '..m.c.m..', 'c..chc..c', '..m.c.m..', '.v..m..v.', '..b...b..', '....c....'], COMBAT_PALETTE, 2),
+    damage: pixelMap(['..m.m..', '.b...b.', 'm..c..m', '...h...', 'm..c..m', '.b...b.', '..m.m..'], COMBAT_PALETTE, 2),
+    spark: pixelMap(['cw', 'wb'], { c: 0xb3edff, w: 0xffffff, b: 0x6b80d7 }, 1),
+    dust: pixelMap(['w'], { w: 0x8a78bd }, 2),
+  };
+  private waveWord = pixelMap(lettering('ONDA'), { w: 0x88d9f5 }, 2);
+  private waveDigits = Array.from({ length: 10 }, (_, digit) => pixelMap(GLYPHS[digit], { w: 0xdff6ff }, 2));
   private stars = [
     pixelMap(['w'], { w: 0xb6cce7 }, 1),
     pixelMap(['ww', 'ww'], { w: 0x9cc4e5 }, 1),
@@ -128,6 +163,15 @@ export class PixelArt {
 
   bullet() { return new Graphics({ context: this.bolt, roundPixels: true, label: 'Pixel bolt' }); }
 
+  combatEffect(kind: CombatGraphic) {
+    return new Graphics({ context: this.combat[kind], roundPixels: true, label: 'Pixel combat effect' });
+  }
+
+  setCombatEffect(view: Graphics, kind: CombatGraphic) { view.context = this.combat[kind]; }
+  waveLabel() { return new Graphics({ context: this.waveWord, roundPixels: true, label: 'ONDA' }); }
+  waveDigit() { return new Graphics({ context: this.waveDigits[0], roundPixels: true, label: 'Wave digit' }); }
+  setWaveDigit(view: Graphics, digit: number) { view.context = this.waveDigits[digit]; }
+
   star(radius: number, color: number, alpha: number) {
     return new Graphics({ context: this.stars[radius < 1 ? 0 : radius < 1.7 ? 1 : 2], tint: color, alpha, roundPixels: true, label: 'Pixel star' });
   }
@@ -139,6 +183,7 @@ export class PixelArt {
   }
 
   destroy() {
-    for (const context of [this.ship, ...this.flameFrames, ...this.meteors, this.bolt, ...this.stars, this.fragment]) context.destroy();
+    for (const context of [this.ship, ...this.flameFrames, ...this.meteors, this.bolt, ...this.stars, this.fragment,
+      ...Object.values(this.combat), this.waveWord, ...this.waveDigits]) context.destroy();
   }
 }

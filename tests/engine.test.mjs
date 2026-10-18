@@ -160,6 +160,47 @@ test('wave progression uses elapsed play time and publishes no duplicate snapsho
   assert.equal(updates.length, count + 1);
 });
 
+test('combat presentation follows real hit/kill/damage/wave events and freezes with the simulation', t => {
+  const { engine } = game(t);
+  engine.spawnCooldown = 999;
+  engine.spawnEnemy();
+  const enemy = engine.enemies[0];
+  enemy.health = 2;
+  engine.fire();
+  enemy.x = engine.bullets[0].x; enemy.y = engine.bullets[0].y;
+  engine.tick({ deltaMS: 0 });
+  assert.equal(enemy.health, 1);
+  assert.equal(engine.snapshot.score, 0);
+  assert.ok(engine.combat.pool.some(e => e.life > 0 && e.kind === 'impact'));
+  assert.equal(engine.combat.pool.some(e => e.life > 0 && e.kind === 'burst'), false);
+  engine.fire(); engine.tick({ deltaMS: 0 });
+  assert.equal(engine.snapshot.score, 100);
+  assert.equal(engine.enemies.length, 0);
+  assert.ok(engine.combat.pool.some(e => e.life > 0 && e.kind === 'burst'));
+  engine.elapsed = 19.99; engine.tick({ deltaMS: 50 });
+  assert.equal(engine.snapshot.wave, 2);
+  assert.ok(engine.combat.banner.visible);
+  engine.invulnerable = 0; engine.spawnEnemy();
+  engine.enemies[0].x = engine.playerX; engine.enemies[0].y = engine.playerY;
+  engine.tick({ deltaMS: 0 });
+  assert.equal(engine.snapshot.lives, 2);
+  assert.equal(engine.invulnerable, 1.5);
+  assert.equal(engine.combat.damageLife, .22);
+  engine.tick({ deltaMS: 50 });
+  assert.notEqual(engine.player.children[0].tint, 0xffffff);
+  engine.togglePause();
+  const visualState = () => JSON.stringify([
+    engine.combat.pool.map(e => [e.x, e.y, e.life, e.view.alpha]),
+    engine.combat.waveLife, engine.combat.damageLife, engine.player.children[0].tint,
+  ]);
+  const before = visualState();
+  for (let i = 0; i < 50; i++) engine.tick({ deltaMS: 50 });
+  assert.equal(visualState(), before);
+  engine.togglePause(); engine.start();
+  assert.equal(engine.player.children[0].tint, 0xffffff);
+  assert.equal(engine.combat.pool.some(e => e.life > 0), false);
+});
+
 const near = (actual, expected) => assert.ok(Math.abs(actual - expected) < 1e-8, `${actual} != ${expected}`);
 
 function mouseCanvas(engine, bounds = { left: 0, top: 0, width: 900, height: 560 }) {

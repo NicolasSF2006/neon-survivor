@@ -4,12 +4,13 @@ import { HEIGHT, MAX_LIVES, STORAGE_KEY, WIDTH, type Controls, type Snapshot, ty
 import { measureViewport } from './viewport.ts';
 import { ACTOR_VISUAL_SCALE, PixelArt } from './PixelArt.ts';
 import { Starfield } from './Starfield.ts';
+import { CombatEffects } from './CombatEffects.ts';
 
 // The nose is 24 units from the pivot in the original pixel map.
 const PLAYER_VISUAL_RADIUS = 24 * ACTOR_VISUAL_SCALE;
 const MUZZLE_DISTANCE = 28 * ACTOR_VISUAL_SCALE;
 
-type Enemy = { view: Graphics; x: number; y: number; radius: number; speed: number; health: number; wobble: number };
+type Enemy = { view: Graphics; x: number; y: number; radius: number; speed: number; health: number; wobble: number; dustTime: number };
 type Bullet = { view: Graphics; x: number; y: number; radius: number; vx: number; vy: number };
 type Particle = { view: Graphics; x: number; y: number; vx: number; vy: number; life: number; maxLife: number };
 
@@ -21,6 +22,7 @@ export class GameEngine {
   private fx = new Container();
   private art = new PixelArt();
   private player = this.art.player();
+  private combat = new CombatEffects(this.art, this.fx, this.actors, this.player.children[0] as Graphics);
   private width = WIDTH;
   private height = HEIGHT;
   private host: HTMLElement | null = null;
@@ -144,6 +146,7 @@ export class GameEngine {
       entity.view.position.set(entity.x, entity.y);
     }
     this.background?.resize(this.width, this.height, Math.min(bounds.width, bounds.height) <= 600);
+    this.combat.resize(this.width, this.height, Math.min(bounds.width, bounds.height) <= 600, viewport.scale);
   };
 
   private onKeyDown = (event: KeyboardEvent) => {
@@ -231,9 +234,11 @@ export class GameEngine {
     this.art.resetThruster(this.player);
     this.elapsed = 0; this.fireCooldown = 0; this.spawnCooldown = 0.7; this.invulnerable = 1.5; this.emissionCooldown = 0;
     this.snapshot = { ...this.snapshot, phase: 'playing', score: 0, lives: MAX_LIVES, wave: 1, elapsed: 0 };
+    this.combat.showWave(1);
     this.publish();
   }
   private resetEntities() {
+    this.combat.clear();
     for (const obj of [...this.enemies, ...this.bullets, ...this.particles]) { obj.view.destroy(); }
     this.enemies = []; this.bullets = []; this.particles = [];
   }
@@ -246,11 +251,12 @@ export class GameEngine {
     bullet.rotation = this.aimAngle + Math.PI / 2;
     bullet.position.set(b.x, b.y);
     this.bullets.push(b); this.actors.addChild(bullet);
+    this.combat.shot(b.x, b.y, this.aimAngle);
   }
   private spawnEnemy() {
     const radius = 14 + Math.random() * 9;
     const view = this.art.meteor(radius);
-    const enemy: Enemy = { view, x: 30 + Math.random() * (this.width - 60), y: -30, radius, speed: 85 + Math.random() * 50 + this.snapshot.wave * 12, health: this.snapshot.wave >= 4 ? 2 : 1, wobble: Math.random() * Math.PI * 2 };
+    const enemy: Enemy = { view, x: 30 + Math.random() * (this.width - 60), y: -30, radius, speed: 85 + Math.random() * 50 + this.snapshot.wave * 12, health: this.snapshot.wave >= 4 ? 2 : 1, wobble: Math.random() * Math.PI * 2, dustTime: .12 + radius * .002 };
     view.position.set(enemy.x, enemy.y); this.enemies.push(enemy); this.actors.addChild(view);
   }
   private explode(x: number, y: number, color: number, count = 10) {
@@ -259,7 +265,7 @@ export class GameEngine {
       const speed = 45 + Math.random() * 160;
       const view = this.art.particle(1.8 + Math.random() * 2.8, color);
       view.position.set(x, y);
-      this.fx.addChild(view);
+      this.fx.addChildAt(view, 0);
       this.particles.push({ view, x, y, vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed, life: 0.55, maxLife: 0.55 });
     }
   }
@@ -270,6 +276,7 @@ export class GameEngine {
     this.snapshot.lives -= 1;
     this.invulnerable = 1.5;
     this.explode(this.playerX, this.playerY, 0x38ddff, 18);
+    this.combat.damage(this.playerX, this.playerY);
     if (this.snapshot.lives <= 0) {
       this.snapshot.phase = 'gameover';
       this.clearControls();
@@ -286,10 +293,11 @@ export class GameEngine {
     const dt = Math.min(ticker.deltaMS / 1000, 0.05);
     this.background?.update(dt);
     if (this.snapshot.phase !== 'playing') return;
+    this.combat.update(dt);
     this.elapsed += dt;
     this.snapshot.elapsed = Math.floor(this.elapsed);
     const newWave = 1 + Math.floor(this.elapsed / 20);
-    if (newWave !== this.snapshot.wave) { this.snapshot.wave = newWave; this.publish(); }
+    if (newWave !== this.snapshot.wave) { this.snapshot.wave = newWave; this.combat.showWave(newWave); this.publish(); }
     const direction = limitedDirection(
       this.moveStick.x + Number(this.input.right || this.pressed.has('d') || this.pressed.has('arrowright')) - Number(this.input.left || this.pressed.has('a') || this.pressed.has('arrowleft')),
       this.moveStick.y + Number(this.input.down || this.pressed.has('s') || this.pressed.has('arrowdown')) - Number(this.input.up || this.pressed.has('w') || this.pressed.has('arrowup'))
@@ -317,8 +325,10 @@ export class GameEngine {
         const enemy = this.enemies[j];
         if (circlesOverlap(bullet, enemy)) {
           enemy.health--; this.explode(bullet.x, bullet.y, 0xa2edff, 3);
+          this.combat.impact(bullet.x, bullet.y);
           if (enemy.health <= 0) {
             this.explode(enemy.x, enemy.y, 0xff547d);
+            this.combat.meteorDestroyed(enemy.x, enemy.y);
             this.removeEnemy(j);
             this.snapshot.score += 100;
             this.publish();
@@ -344,6 +354,12 @@ export class GameEngine {
         this.removeEnemy(i);
         this.loseLife();
         if (this.snapshot.lives <= 0) return;
+        continue;
+      }
+      enemy.dustTime -= dt;
+      if (enemy.dustTime <= 0) {
+        this.combat.meteorTrail(enemy.x, enemy.y, enemy.radius * ACTOR_VISUAL_SCALE);
+        enemy.dustTime += .18;
       }
     }
     for (let i = this.particles.length - 1; i >= 0; i--) {
