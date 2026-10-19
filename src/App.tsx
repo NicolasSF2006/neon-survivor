@@ -54,7 +54,10 @@ export default function App() {
           <path d="M12 21 3.5 12.7C-2 7.2 5.6-.5 12 6c6.4-6.5 14 1.2 8.5 6.7Z" />
         </svg>)}
       </div>
-      <strong className="score" aria-label={`Pontuação: ${formatScore(state.score)}`}>{formatScore(state.score)}</strong>
+      <dl className="scoreboard">
+        <div className="score"><dt>PONTUAÇÃO</dt><dd>{formatScore(state.score)}</dd></div>
+        <div className="score best-score"><dt>RECORDE</dt><dd>{formatScore(state.best)}</dd></div>
+      </dl>
       <div className="wave-group"><span className="wave">ONDA <strong>{String(state.wave).padStart(2, '0')}</strong></span>
         <button type="button" className="pause-button" aria-label={active ? 'Pausar partida' : 'Continuar partida'} onClick={() => engine.current?.pause()}>
           <svg viewBox="0 0 24 24" aria-hidden="true">{active ? <path d="M8 6v12M16 6v12" /> : <path d="m9 5 9 7-9 7Z" />}</svg>

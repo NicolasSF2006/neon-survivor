@@ -184,6 +184,43 @@ test('last life stops the current collision loop and preserves the final score a
   assert.equal(engine.enemies.length + engine.particles.length + engine.bullets.length, 0);
 });
 
+test('scoring publishes and persists a new record immediately, preserving it across restarts', t => {
+  const { engine, updates } = game(t);
+  storage.clear();
+  engine.snapshot.best = 100;
+  storage.set(STORAGE_KEY, '100');
+  for (let i = 0; i < 2; i++) {
+    engine.spawnEnemy(); engine.fire();
+    const enemy = engine.enemies[0], bullet = engine.bullets[0];
+    enemy.health = 1; enemy.y = 200;
+    bullet.x = enemy.x; bullet.y = enemy.y;
+    engine.tick({ deltaMS: 0 });
+    assert.equal(engine.snapshot.score, (i + 1) * 100);
+    assert.equal(engine.snapshot.best, Math.max(100, engine.snapshot.score));
+    assert.equal(storage.get(STORAGE_KEY), String(engine.snapshot.best));
+    assert.equal(updates.at(-1).best, engine.snapshot.best);
+    assert.equal(engine.snapshot.phase, 'playing');
+  }
+  engine.start();
+  assert.equal(engine.snapshot.score, 0);
+  assert.equal(engine.snapshot.best, 200);
+  assert.equal(storage.get(STORAGE_KEY), '200');
+});
+
+test('a storage failure cannot prevent scoring or the in-memory record update', t => {
+  const { engine } = game(t);
+  const original = localStorage.setItem;
+  localStorage.setItem = () => { throw Error('Storage denied'); };
+  t.after(() => { localStorage.setItem = original; });
+  engine.spawnEnemy(); engine.fire();
+  const enemy = engine.enemies[0], bullet = engine.bullets[0];
+  enemy.health = 1; enemy.y = 200;
+  bullet.x = enemy.x; bullet.y = enemy.y;
+  assert.doesNotThrow(() => engine.tick({ deltaMS: 0 }));
+  assert.equal(engine.snapshot.score, 100);
+  assert.equal(engine.snapshot.best, 100);
+});
+
 test('wave progression uses elapsed play time and publishes no duplicate snapshots', t => {
   const { engine, updates } = game(t);
   const count = updates.length;

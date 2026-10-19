@@ -2,7 +2,7 @@
 
 Um jogo arcade 2D de sobrevivência, criado como **protótipo independente de portfólio** com React, TypeScript, PixiJS 8 e Vite. O projeto não é afiliado à Jungle Gaming.
 
-O cenário ocupa toda a janela do navegador. Durante a partida, o HUD mostra apenas corações no canto superior esquerdo, pontuação no centro e onda no canto superior direito, junto do botão de pausa. Início, instruções, pausa e Game Over aparecem sobre o próprio cenário. O Game Over mostra apenas título, score final e botão para jogar novamente. O recorde local continua salvo internamente, sem aparecer na interface.
+O cenário ocupa toda a janela do navegador. Durante a partida, o HUD mostra corações no canto superior esquerdo, pontuação em ciano e recorde em roxo no centro, e onda no canto superior direito, junto do botão de pausa. Em telas estreitas, pontuação e recorde aparecem juntos numa segunda linha. Início, instruções, pausa e Game Over aparecem sobre o próprio cenário. O Game Over mostra apenas título, score final e botão para jogar novamente. O recorde local é atualizado e salvo assim que a pontuação o supera, persistindo entre partidas e recarregamentos.
 
 ## Versão online
 
@@ -127,7 +127,7 @@ Ondas continuam avançando a cada 20 segundos de jogo. A remoção de meteoros f
 
 ### Comunicação entre HUD e jogo
 
-A engine mantém as posições e a simulação fora do React. `GameCanvas` entrega snapshots imutáveis por callback e registra os comandos de início, pausa e controles. O HUD lê `lives`, `score` e `wave`; os menus também usam `phase` e `score`. O recorde `best` permanece interno.
+A engine mantém as posições e a simulação fora do React. `GameCanvas` entrega snapshots imutáveis por callback e registra os comandos de início, pausa e controles. O HUD lê `lives`, `score`, `best` e `wave`; os menus também usam `phase` e `score`. O recorde usa o mesmo snapshot e armazenamento existentes, sem estado duplicado no React.
 
 Os snapshots são publicados imediatamente em eventos relevantes (pontuação, vida, onda, pausa e fim) e verificados aproximadamente a cada 150 ms para atualizar o tempo interno. Snapshots idênticos são descartados. Não há atualização de posição via `setState` a cada frame. A chave existente `neon-survivor-best-v1` do localStorage é preservada.
 

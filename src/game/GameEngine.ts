@@ -156,7 +156,8 @@ export class GameEngine {
     this.background?.resize(this.width, this.height, Math.min(bounds.width, bounds.height) <= 600);
     const styles = typeof getComputedStyle === 'function' ? getComputedStyle(this.host) : null;
     this.combat.resize(this.width, this.height, Math.min(bounds.width, bounds.height) <= 600, viewport.scale, {
-      top: Number.parseFloat(styles?.getPropertyValue('--safe-top') ?? '') || 0,
+      top: (Number.parseFloat(styles?.getPropertyValue('--safe-top') ?? '') || 0)
+        + (Number.parseFloat(styles?.getPropertyValue('--hud-extra-height') ?? '') || 0),
       right: Number.parseFloat(styles?.getPropertyValue('--safe-right') ?? '') || 0,
       bottom: Number.parseFloat(styles?.getPropertyValue('--safe-bottom') ?? '') || 0,
       left: Number.parseFloat(styles?.getPropertyValue('--safe-left') ?? '') || 0,
@@ -306,13 +307,15 @@ export class GameEngine {
       this.combat.setPlaying(false);
       this.clearControls();
       this.player.visible = false;
-      if (this.snapshot.score > this.snapshot.best) {
-        this.snapshot.best = this.snapshot.score;
-        try { localStorage.setItem(STORAGE_KEY, String(this.snapshot.best)); } catch { /* storage denied */ }
-      }
+      this.updateBest();
       this.notify({ type: 'gameover' });
     }
     this.publish();
+  }
+  private updateBest() {
+    if (this.snapshot.score <= this.snapshot.best) return;
+    this.snapshot.best = this.snapshot.score;
+    try { localStorage.setItem(STORAGE_KEY, String(this.snapshot.best)); } catch { /* storage denied */ }
   }
   private tick = (ticker: { deltaMS: number }) => {
     if (this.snapshot.phase === 'paused' || this.snapshot.phase === 'gameover') return;
@@ -359,6 +362,7 @@ export class GameEngine {
             this.notify({ type: 'destroy' });
             this.removeEnemy(j);
             this.snapshot.score += 100;
+            this.updateBest();
             this.publish();
           }
           hit = true; break;
