@@ -2,6 +2,8 @@
 import { GameCanvas, type GameHandle } from './components/GameCanvas';
 import { VirtualJoystick } from './components/VirtualJoystick';
 import { MAX_LIVES, type Snapshot } from './game/types';
+import { AudioSettings } from './components/AudioSettings';
+import { DEFAULT_AUDIO, type AudioPreferences } from './audio/preferences';
 
 const initial: Snapshot = { phase: 'ready', score: 0, lives: MAX_LIVES, wave: 1, elapsed: 0, best: 0, mute: false };
 const formatScore = (score: number) => score.toLocaleString('pt-BR');
@@ -9,6 +11,7 @@ const formatScore = (score: number) => score.toLocaleString('pt-BR');
 export default function App() {
   const [state, setState] = useState<Snapshot>(initial);
   const [ready, setReady] = useState(false);
+  const [audioPreferences, setAudioPreferences] = useState<AudioPreferences>({ ...DEFAULT_AUDIO });
   const [touchInput, setTouchInput] = useState(() => window.matchMedia('(pointer: coarse)').matches);
   const engine = useRef<GameHandle | null>(null);
   const heading = useRef<HTMLHeadingElement>(null);
@@ -43,7 +46,7 @@ export default function App() {
   }, []);
 
   return <main className={`game${touchInput ? ' input-touch' : ''}`} aria-label="Neon Survivor">
-    <GameCanvas onSnapshot={onSnapshot} register={register} />
+    <GameCanvas onSnapshot={onSnapshot} register={register} onAudioPreferences={setAudioPreferences} />
 
     {(active || state.phase === 'paused') && <div className="hud" aria-label="Estado da partida">
       <div className="hearts" role="img" aria-label={`${state.lives} de ${MAX_LIVES} vidas`}>
@@ -80,6 +83,8 @@ export default function App() {
         </>}
       </section>
     </div>}
+
+    {(state.phase === 'ready' || state.phase === 'paused') && <AudioSettings key={state.phase} audio={engine.current?.audio} preferences={audioPreferences} />}
 
     {active && touchInput && <div className="touch-controls" role="group" aria-label="Controles de toque">
       <VirtualJoystick kind="move" label="Mover nave" onChange={value => engine.current?.setStick('move', value)} />

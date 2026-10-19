@@ -5,6 +5,7 @@ import { measureViewport } from './viewport.ts';
 import { ACTOR_VISUAL_SCALE, PixelArt } from './PixelArt.ts';
 import { Starfield } from './Starfield.ts';
 import { CombatEffects } from './CombatEffects.ts';
+import type { GameEvent } from './events.ts';
 
 // The nose is 24 units from the pivot in the original pixel map.
 const PLAYER_VISUAL_RADIUS = 24 * ACTOR_VISUAL_SCALE;
@@ -28,6 +29,7 @@ export class GameEngine {
   private host: HTMLElement | null = null;
   private resizeObserver: ResizeObserver | null = null;
   private resizeFrame = 0;
+  private motionQuery: MediaQueryList | null = null;
   private enemies: Enemy[] = [];
   private bullets: Bullet[] = [];
   private particles: Particle[] = [];
@@ -52,14 +54,17 @@ export class GameEngine {
   private destroyed = false;
   private rafIsRunning = false;
   private onChange: (snapshot: Snapshot) => void;
+  private onEvent?: (event: GameEvent) => void;
   private lastPublished: Snapshot | null = null;
   private snapshot: Snapshot = { phase: 'ready', score: 0, lives: MAX_LIVES, wave: 1, elapsed: 0, best: 0, mute: false };
 
-  constructor(onChange: (snapshot: Snapshot) => void) {
+  constructor(onChange: (snapshot: Snapshot) => void, onEvent?: (event: GameEvent) => void) {
     this.onChange = onChange;
+    this.onEvent = onEvent;
     this.app.stage.addChild(this.world);
     this.world.addChild(this.decor, this.actors, this.fx);
     this.actors.addChild(this.player);
+    this.combat.setPlaying(false);
   }
 
   async mount(host: HTMLElement) {
@@ -86,6 +91,9 @@ export class GameEngine {
     this.app.canvas.style.display = 'block';
     this.app.canvas.style.touchAction = 'none';
     this.setupStage();
+    this.motionQuery = window.matchMedia?.('(prefers-reduced-motion: reduce)') ?? null;
+    this.combat.setReducedMotion(this.motionQuery?.matches ?? false);
+    this.motionQuery?.addEventListener('change', this.onMotionChange);
     this.resize();
     this.resizeObserver = new ResizeObserver(this.scheduleResize);
     this.resizeObserver.observe(host);
@@ -146,11 +154,20 @@ export class GameEngine {
       entity.view.position.set(entity.x, entity.y);
     }
     this.background?.resize(this.width, this.height, Math.min(bounds.width, bounds.height) <= 600);
-    this.combat.resize(this.width, this.height, Math.min(bounds.width, bounds.height) <= 600, viewport.scale);
+    const styles = typeof getComputedStyle === 'function' ? getComputedStyle(this.host) : null;
+    this.combat.resize(this.width, this.height, Math.min(bounds.width, bounds.height) <= 600, viewport.scale, {
+      top: Number.parseFloat(styles?.getPropertyValue('--safe-top') ?? '') || 0,
+      right: Number.parseFloat(styles?.getPropertyValue('--safe-right') ?? '') || 0,
+      bottom: Number.parseFloat(styles?.getPropertyValue('--safe-bottom') ?? '') || 0,
+      left: Number.parseFloat(styles?.getPropertyValue('--safe-left') ?? '') || 0,
+    });
   };
+
+  private onMotionChange = (event: MediaQueryListEvent) => this.combat.setReducedMotion(event.matches);
 
   private onKeyDown = (event: KeyboardEvent) => {
     const key = event.key.toLowerCase();
+    if (event.target instanceof HTMLElement && event.target.closest('dialog, input, select, textarea')) return;
     // Let focused menu buttons receive their native Space/Enter activation once.
     if ((key === ' ' || key === 'enter') && event.target instanceof HTMLElement && event.target.closest('button')) return;
     if (['arrowleft', 'arrowright', 'arrowup', 'arrowdown', ' '].includes(key)) event.preventDefault();
@@ -212,12 +229,15 @@ export class GameEngine {
       this.aimAngle = Math.atan2(limited.y, limited.x);
     }
   }
-  toggleMute() { this.snapshot.mute = !this.snapshot.mute; this.publish(); }
+  setMuted(muted: boolean) { if (this.snapshot.mute !== muted) { this.snapshot.mute = muted; this.publish(); } }
+  toggleMute() { this.setMuted(!this.snapshot.mute); this.notify({ type: 'mute', muted: this.snapshot.mute }); }
   togglePause() {
     if (this.snapshot.phase === 'playing') this.snapshot.phase = 'paused';
     else if (this.snapshot.phase === 'paused') this.snapshot.phase = 'playing';
     else return;
     this.clearControls();
+    this.combat.setPlaying(this.snapshot.phase === 'playing');
+    this.notify({ type: this.snapshot.phase === 'paused' ? 'pause' : 'resume' });
     this.publish();
   }
   start() {
@@ -234,7 +254,9 @@ export class GameEngine {
     this.art.resetThruster(this.player);
     this.elapsed = 0; this.fireCooldown = 0; this.spawnCooldown = 0.7; this.invulnerable = 1.5; this.emissionCooldown = 0;
     this.snapshot = { ...this.snapshot, phase: 'playing', score: 0, lives: MAX_LIVES, wave: 1, elapsed: 0 };
+    this.combat.setPlaying(true);
     this.combat.showWave(1);
+    this.notify({ type: 'start' });
     this.publish();
   }
   private resetEntities() {
@@ -252,6 +274,7 @@ export class GameEngine {
     bullet.position.set(b.x, b.y);
     this.bullets.push(b); this.actors.addChild(bullet);
     this.combat.shot(b.x, b.y, this.aimAngle);
+    this.notify({ type: 'shot' });
   }
   private spawnEnemy() {
     const radius = 14 + Math.random() * 9;
@@ -277,14 +300,17 @@ export class GameEngine {
     this.invulnerable = 1.5;
     this.explode(this.playerX, this.playerY, 0x38ddff, 18);
     this.combat.damage(this.playerX, this.playerY);
+    this.notify({ type: 'damage' });
     if (this.snapshot.lives <= 0) {
       this.snapshot.phase = 'gameover';
+      this.combat.setPlaying(false);
       this.clearControls();
       this.player.visible = false;
       if (this.snapshot.score > this.snapshot.best) {
         this.snapshot.best = this.snapshot.score;
         try { localStorage.setItem(STORAGE_KEY, String(this.snapshot.best)); } catch { /* storage denied */ }
       }
+      this.notify({ type: 'gameover' });
     }
     this.publish();
   }
@@ -297,7 +323,7 @@ export class GameEngine {
     this.elapsed += dt;
     this.snapshot.elapsed = Math.floor(this.elapsed);
     const newWave = 1 + Math.floor(this.elapsed / 20);
-    if (newWave !== this.snapshot.wave) { this.snapshot.wave = newWave; this.combat.showWave(newWave); this.publish(); }
+    if (newWave !== this.snapshot.wave) { this.snapshot.wave = newWave; this.combat.showWave(newWave); this.notify({ type: 'wave', wave: newWave }); this.publish(); }
     const direction = limitedDirection(
       this.moveStick.x + Number(this.input.right || this.pressed.has('d') || this.pressed.has('arrowright')) - Number(this.input.left || this.pressed.has('a') || this.pressed.has('arrowleft')),
       this.moveStick.y + Number(this.input.down || this.pressed.has('s') || this.pressed.has('arrowdown')) - Number(this.input.up || this.pressed.has('w') || this.pressed.has('arrowup'))
@@ -325,10 +351,12 @@ export class GameEngine {
         const enemy = this.enemies[j];
         if (circlesOverlap(bullet, enemy)) {
           enemy.health--; this.explode(bullet.x, bullet.y, 0xa2edff, 3);
-          this.combat.impact(bullet.x, bullet.y);
+          if (enemy.health > 0) this.combat.impact(bullet.x, bullet.y);
+          this.notify({ type: 'impact' });
           if (enemy.health <= 0) {
             this.explode(enemy.x, enemy.y, 0xff547d);
             this.combat.meteorDestroyed(enemy.x, enemy.y);
+            this.notify({ type: 'destroy' });
             this.removeEnemy(j);
             this.snapshot.score += 100;
             this.publish();
@@ -369,9 +397,13 @@ export class GameEngine {
       particle.view.position.set(particle.x, particle.y);
       particle.view.alpha = particle.life / particle.maxLife;
     }
+    this.combat.trackMeteors(this.enemies, this.playerX, this.playerY, this.elapsed, this.invulnerable);
     this.emissionCooldown += dt;
     if (this.emissionCooldown > 0.15) { this.emissionCooldown = 0; this.publish(); }
   };
+  private notify(event: GameEvent) {
+    try { this.onEvent?.(event); } catch { /* Presentation listeners cannot interrupt gameplay. */ }
+  }
   private publish() {
     const previous = this.lastPublished;
     const next = this.snapshot;
@@ -395,6 +427,8 @@ export class GameEngine {
       this.app.canvas.removeEventListener('lostpointercapture', this.onPointerEnd);
     }
     this.resizeObserver?.disconnect();
+    this.motionQuery?.removeEventListener('change', this.onMotionChange);
+    this.motionQuery = null;
     if (this.resizeFrame) cancelAnimationFrame(this.resizeFrame);
     this.clearControls();
     this.host = null;

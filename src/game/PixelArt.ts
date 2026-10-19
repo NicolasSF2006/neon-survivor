@@ -1,7 +1,7 @@
 import { Container, Graphics, GraphicsContext } from 'pixi.js';
 
 type Palette = Record<string, number>;
-export type CombatGraphic = 'muzzle' | 'impact' | 'burst' | 'damage' | 'spark' | 'dust';
+export type CombatGraphic = 'muzzle' | 'impact' | 'burst' | 'damage' | 'spark' | 'dust' | 'entry' | 'near' | 'danger';
 
 /** Presentation only: collision radii remain in the engine's logical units. */
 export const ACTOR_VISUAL_SCALE = 1.25;
@@ -141,11 +141,14 @@ export class PixelArt {
   private bolt = pixelMap(['..h..', '.chc.', '.bhb.', '.ccc.', '..c..', '.bcb.', '..b..', '.g.g.', '..g..', '..g..'], { h: 0xf0fdff, c: 0x78eaff, b: 0x3a8ebd, g: 0x173552 }, 2);
   private combat = {
     muzzle: pixelMap(['..c..', '.chc.', 'bhhhb', '.chc.', '..b..'], COMBAT_PALETTE, 2),
-    impact: pixelMap(['..c..', '.b.b.', 'chhhc', '.b.b.', '..c..'], COMBAT_PALETTE, 2),
+    impact: pixelMap(['.c.c.', 'b...b', '..h..', 'b...b', '.c.c.'], COMBAT_PALETTE, 2),
     burst: pixelMap(['....c....', '..b...b..', '.v..m..v.', '..m.c.m..', 'c..chc..c', '..m.c.m..', '.v..m..v.', '..b...b..', '....c....'], COMBAT_PALETTE, 2),
     damage: pixelMap(['..m.m..', '.b...b.', 'm..c..m', '...h...', 'm..c..m', '.b...b.', '..m.m..'], COMBAT_PALETTE, 2),
     spark: pixelMap(['cw', 'wb'], { c: 0xb3edff, w: 0xffffff, b: 0x6b80d7 }, 1),
     dust: pixelMap(['w'], { w: 0x8a78bd }, 2),
+    entry: pixelMap(['..vvv..', '.b...b.', 'c.....c'], COMBAT_PALETTE, 2),
+    near: pixelMap(['c....', '.b...', '..c..', '...b.', '....c'], COMBAT_PALETTE, 1),
+    danger: pixelMap(['...m...', '..mvm..', '.mv.vm.', 'mv...vm', '...v...', '...v...', '...v...'], { m: 0xd568a7, v: 0x764e85 }, 2),
   };
   private waveWord = pixelMap(lettering('ONDA'), { w: 0x88d9f5 }, 2);
   private waveDigits = Array.from({ length: 10 }, (_, digit) => pixelMap(GLYPHS[digit], { w: 0xdff6ff }, 2));

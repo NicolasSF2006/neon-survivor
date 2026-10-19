@@ -62,6 +62,8 @@ npm test         # testes de matemática, viewport, joysticks e engine (Node 22.
 - **Starfield**: três camadas decorativas de estrelas, independentes da simulação da partida.
 - **GameEngine**: lógica e ciclo de vida da partida, movimento, inimigos, colisão circular e partículas.
 - **GameCanvas**: ponte entre a aplicação React e o PixiJS; instancia a engine no `useEffect`, com limpeza adequada.
+- **Web Audio API**: um contexto sob demanda, síntese musical e efeitos originais, sem arquivos de áudio ou serviços externos.
+- **AudioManager / MusicEngine / SoundEffects**: preferências e ciclo de vida, composição/agendamento e vozes de efeitos separados da simulação.
 - **math.ts**: funções puras testáveis (`clamp`, `circlesOverlap`, `normalizedDirection`).
 - **LocalStorage**: persistência local do recorde, sem backend.
 
@@ -93,9 +95,15 @@ Atrás das estrelas ficam duas manchas de nebulosa pixelada e uma lua distante, 
 
 ### Feedback de combate
 
-`CombatEffects.ts` concentra o polimento visual: projéteis com rastro curto integrado ao mapa de pixels, flash de boca de disparo de 70 ms, impacto de 120 ms e burst de destruição de 220 ms acompanhado de pequenas faíscas e dos fragmentos existentes. O dano acrescenta uma tonalidade breve no corpo da nave e um burst discreto, preservando a piscada e os 1,5 segundos de invulnerabilidade. Meteoros deixam poeira curta atrás dos atores. O início e a troca de ondas exibem uma legenda pixelada por 1,15 segundo, abaixo do HUD, sem interromper a partida.
+`CombatEffects.ts` concentra o polimento visual: projéteis com rastro curto integrado ao mapa de pixels, flash de boca de disparo de 70 ms, impacto de 120 ms e burst de destruição de 220 ms acompanhado de pequenas faíscas e dos fragmentos existentes. O impacto comum tem contorno aberto e aparece quando o meteoro resiste; o acerto fatal usa somente o burst maior, sem duplicar o flash. Partículas e eventos sonoros dos acertos permanecem iguais. O dano acrescenta uma tonalidade breve no corpo da nave e um burst discreto, preservando a piscada e os 1,5 segundos de invulnerabilidade. Meteoros deixam poeira curta atrás dos atores. O início e a troca de ondas exibem uma legenda pixelada por 1,15 segundo, abaixo do HUD, sem interromper a partida.
 
-As geometrias de flashes e letras são compartilhadas. Os novos efeitos reutilizam 80 gráficos pré-alocados, com orçamento de 40 ativos em telas pequenas e capacidade reservada para feedback de combate separada da poeira. O sorteio visual é independente do `Math.random` usado pelo jogo. A animação usa delta time, congela em pausa/Game Over e é limpa ao reiniciar; o resize remapeia somente as posições visuais. A geometria e os objetos do pool são liberados junto com a cena. Não há filtros de blur, listeners ou timers adicionais, nem dependências novas.
+As geometrias de flashes e letras são compartilhadas. Os efeitos reutilizam 80 gráficos pré-alocados, com orçamento de 40 ativos em telas pequenas e capacidade reservada para feedback de combate separada da poeira. O sorteio visual é independente do `Math.random` usado pelo jogo. A animação usa delta time, congela em pausa/Game Over e é limpa ao reiniciar; o resize remapeia somente as posições visuais. A geometria e os objetos do pool são liberados junto com a cena. Não há filtros de blur, timers de efeitos ou dependências novas.
+
+Indicadores de perigo usam três gráficos adicionais fixos, compartilhando um único mapa de seta magenta. No máximo três aparecem no desktop ou dois em telas pequenas, com agrupamento a 32 px e prioridade para a ameaça mais próxima no tempo. Só são considerados meteoros ainda inteiramente fora da tela, entrando em até 0,65 s e cuja velocidade aproximada aponta para perto da nave vulnerável em até 1,15 s. Um meteoro visível, removido, saindo do cenário ou distante dessa trajetória deixa de gerar aviso. As setas são estáticas, abaixo do HUD, respeitam safe areas e reservam os cantos dos joysticks inclusive em tablets. A previsão é informativa e não altera entidades. Como o surgimento atual ocorre em y=-30, a antecedência dos avisos superiores é curta e depende do tamanho/velocidade; não foram antecipados spawns para prolongá-la.
+
+Um pequeno arco de entrada dura 180 ms quando a frente do meteoro alcança a faixa livre abaixo do HUD. Esse realce não esconde o sprite nem adia movimento ou colisões. Uma passagem a até 12 unidades além da soma dos hitboxes pode produzir um brilho de 180 ms perto da nave, somente depois de começar a se afastar e sem contato geométrico. Não há dano, pontos ou som adicional: o brilho ocorre no máximo uma vez por meteoro, com intervalo visual global de 350 ms. Entrada e proximidade usam os slots decorativos existentes; não aumentam o pool de partículas nem ocupam a reserva dos impactos. Observações ficam em um `WeakMap`, e os indicadores descartam referências às ameaças após cada reavaliação. Pausa/Game Over ocultam os novos sinais; reinício limpa as observações.
+
+`prefers-reduced-motion` é consultado na montagem e acompanhado por um listener removido na desmontagem. Nesse modo, os sinais continuam estáticos, o texto de onda não desliza, flashes de boca e poeira decorativa são suprimidos e os bursts têm menor brilho e menos faíscas móveis. Os fragmentos originais e a invulnerabilidade da nave mantêm suas regras. Cor e formato diferenciam seta de perigo, arco de entrada, brilho de proximidade, impacto aberto e destruição em estrela.
 
 ### Mira, disparos e joysticks
 
@@ -123,6 +131,31 @@ A engine mantém as posições e a simulação fora do React. `GameCanvas` entre
 
 Os snapshots são publicados imediatamente em eventos relevantes (pontuação, vida, onda, pausa e fim) e verificados aproximadamente a cada 150 ms para atualizar o tempo interno. Snapshots idênticos são descartados. Não há atualização de posição via `setState` a cada frame. A chave existente `neon-survivor-best-v1` do localStorage é preservada.
 
+### Áudio Synthwave + Chiptune
+
+A trilha e os nove efeitos são originais e gerados em código com a Web Audio API nativa, sem samples baixados, melodias comerciais ou dependências adicionais. A composição usa 112 BPM, tonalidade de Lá menor e progressão Am–F–C–G em oito compassos. Pads triangulares filtrados, baixo, arpejos em onda quadrada, melodia complementar e percussão sintetizada formam um loop; pequenas variações de registro alternam entre repetições. Envelopes de ataque/decaimento e filtros controlam transientes e agudos.
+
+| Ondas | Arranjo |
+| --- | --- |
+| 1–3 | Pad discreto, baixo simples, arpejo leve e batida espaçada |
+| 4–6 | Baixo mais presente, hi-hat e melodia complementar |
+| 7–9 | Batida e arpejos mais presentes, harmonia mais intensa |
+| 10+ | Camadas principais, pequenos acentos e intensidade limitada |
+
+As ondas solicitam a intensidade; a mudança de ganhos ocorre suavemente no próximo compasso, sem reiniciar a música. Um único agendador consulta o relógio do `AudioContext` a cada 25 ms e agenda até 120 ms adiante, independentemente do ticker/FPS. A harmonia sustentada é reconstruída ao continuar uma pausa, preservando a posição musical; não são reproduzidas notas atrasadas em sequência após suspensão.
+
+Os efeitos cobrem disparo, impacto, destruição de meteoro, dano, Game Over descendente, início de onda, confirmação da interface, pausa e retomada. São pequenos buffers PCM compartilhados; tiros, impactos e explosões têm variação de reprodução controlada sem consumir o RNG da partida. Há limites por categoria, até dez vozes de combate e dezesseis efeitos no total, com espaço reservado para alertas/interface. A música tem até 32 vozes temporárias. Nós são desconectados ao terminar e timers, listeners, buffers e contexto são liberados na desmontagem.
+
+O botão de alto-falante no menu inicial e na pausa abre um painel modal com volumes independentes de **Música** e **Efeitos**, de 0% a 100%, com porcentagens visíveis. Ajustar um volume para 0% silencia somente aquela categoria. Os padrões são 35%, 60% e áudio ativado. O painel mantém apenas título, botão de fechar e sliders com rótulos, foco/navegação por teclado, fechamento por Esc e controles de toque. A infraestrutura interna de mute e sua preferência persistida são preservadas. O painel não aparece durante a partida nem altera o HUD.
+
+As preferências são validadas e salvas somente no localStorage, na chave `neon-survivor-audio-v1`; o recorde mantém sua chave anterior. Se o armazenamento for bloqueado, as configurações continuam funcionando na sessão. Não há reprodução nem criação de contexto ao carregar a página: Jogar/Enter ou uma interação com o painel libera o áudio conforme as regras de autoplay do navegador. Bloqueio/ausência de Web Audio não impede jogar; o console fornece diagnóstico discreto.
+
+Pausa interrompe música e efeitos de combate e permite ajustar volumes. Perder foco/ocultar a aba suspende o contexto; recuperar o foco não retoma a partida ou o som automaticamente. Continuar/P/Esc retoma após uma ação permitida. Game Over interrompe o combate e toca um encerramento curto; Jogar novamente limpa vozes antigas e reinicia a progressão musical, mantendo volumes e mute.
+
+Os testes com mocks verificam o ciclo de vida, o agendamento e os limites, mas não comprovam qualidade sonora subjetiva. Essa avaliação exige escuta em alto-falantes/fones e testes em dispositivos reais.
+
+Referência técnica: [autoplay e controles da Web Audio API (MDN)](https://developer.mozilla.org/en-US/docs/Web/API/Web_Audio_API/Best_practices).
+
 ## Estrutura
 
 ```text
@@ -130,6 +163,12 @@ src/
   App.tsx                   Interface React / HUD e controles
   components/GameCanvas.tsx Montagem e desmontagem do PixiJS
   components/VirtualJoystick.tsx Controles analógicos de toque
+  components/AudioSettings.tsx Painel de volumes de música e efeitos
+  audio/AudioManager.ts      Contexto, preferências, estados e eventos
+  audio/MusicEngine.ts       Composição e agendamento musical por compassos
+  audio/SoundEffects.ts      Buffers originais e limites de vozes
+  audio/preferences.ts      Validação e armazenamento das preferências
+  game/events.ts            Notificações de apresentação sem síntese na engine
   game/GameEngine.ts        Renderização e lógica do jogo
   game/PixelArt.ts          Mapas de pixels, geometria compartilhada e animação visual
   game/CombatEffects.ts     Feedback visual de combate, rastros e avisos de ondas
@@ -145,7 +184,8 @@ tests/engine.test.mjs       Resize/colisões, pausa, input, Game Over e snapshot
 tests/joystick.test.mjs     Dois ponteiros, zona morta, isolamento e liberação
 tests/pixel-art.test.mjs    Reuso de geometria, pivô estável e liberação de recursos
 tests/starfield.test.mjs    Camadas, delta time, reciclagem e ciclo de vida das estrelas
-tests/combat-effects.test.mjs Pool, delta time, orçamento mobile, avisos e limpeza dos efeitos
+tests/combat-effects.test.mjs Pool, ameaças seletivas, entrada/proximidade, movimento reduzido e limpeza
+tests/audio.test.mjs        Preferências, vozes, transporte, falhas e liberação de áudio
 vercel.json                Framework, instalação, build e saída para a Vercel
 docs/ARQUITETURA.md         Explicação para entrevista
 docs/PUBLICACAO.md          Preparação, autenticação e validação da publicação
@@ -170,7 +210,7 @@ Depois de obter a URL pública, valide carregamento, partida, controles, menus, 
 
 ## Escopo e limites honestos
 
-Esta é uma demonstração **single-player, client-side**. Não possui API REST, multiplayer, WebSockets, autenticação, ranking global ou áudio. Os gráficos são criados em código; as fontes Google Fonts têm fallback local. Para jogo comercial seriam necessários testes em dispositivos reais, mais opções de acessibilidade, áudio e melhorias de balanceamento. A área visível varia entre proporções de tela, portanto o tempo de travessia dos inimigos também pode variar; não foi introduzido um novo balanceamento nesta etapa.
+Esta é uma demonstração **single-player, client-side**. Não possui API REST, multiplayer, WebSockets, autenticação ou ranking global. Gráficos e áudio são criados em código; as fontes Google Fonts têm fallback local. Para jogo comercial seriam necessários testes em dispositivos reais, avaliação sonora por escuta, mais opções de acessibilidade e melhorias de balanceamento. A área visível varia entre proporções de tela, portanto o tempo de travessia dos inimigos também pode variar; não foi introduzido um novo balanceamento nesta etapa.
 
 ## Checklist manual sugerido
 
@@ -184,9 +224,10 @@ Esta é uma demonstração **single-player, client-side**. Não possui API REST,
 8. Teste 1920×1080, 1366×768, 390×844 e 844×390. Redimensione durante a partida e confirme nave acessível, HUD sem sobreposição, ausência de rolagem e colisões funcionando.
 9. Em celular, arraste os dois joysticks simultaneamente; solte o direito para parar os tiros, cancele um toque ou troque de aba. Confirme que a nave não permanece em movimento depois de continuar. Verifique retrato e paisagem.
 10. Na pausa, confirme que inimigos, estrelas, partículas e ondas ficam parados; no Game Over, o placar deve permanecer fixo.
+11. Abra Áudio no menu/pausa, ajuste os dois volumes, teste cada categoria em 0% e recarregue para conferir a persistência. Verifique início após gesto, transições nas ondas 4/7/10, pausa/retomada, aba oculta e reinício, ouvindo tiros contínuos, impactos, dano e encerramento.
 
 ## Autoria e uso
 
 Protótipo para estudo e demonstração técnica. MIT (veja LICENSE).
 
-O desenvolvimento contou com assistência de IA por meio do Codex, incluindo geração e alteração de código, elaboração e execução de testes, revisão e documentação. As alterações recentes de interface, pixel art procedural, propulsor e paralaxe também tiveram esse apoio. Esta documentação registra esse processo; não atribui ao autor uma implementação manual integral. Os elementos gráficos do jogo são definidos em código.
+O desenvolvimento contou com assistência de IA por meio do Codex, incluindo geração e alteração de código, elaboração e execução de testes, revisão e documentação. As alterações de interface, pixel art procedural, propulsor, paralaxe e o sistema de áudio programático também tiveram esse apoio. Esta documentação registra esse processo; não atribui ao autor uma implementação manual integral. Os elementos gráficos e sonoros do jogo são definidos em código.

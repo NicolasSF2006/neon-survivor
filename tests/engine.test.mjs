@@ -10,9 +10,46 @@ globalThis.document = new EventTarget();
 const storage = new Map();
 globalThis.localStorage = { setItem: (key, value) => storage.set(key, value) };
 
-function game(t) {
+test('presentation events follow actual hits, kills, damage, waves and phases exactly once', t => {
+  const events = [], engine = new GameEngine(() => {}, event => events.push(event));
+  engine.setupStage(); engine.mounted = true; engine.start();
+  t.after(() => { engine.mounted = false; engine.destroy(); });
+  assert.deepEqual(events.splice(0), [{ type: 'start' }]);
+  engine.fire(); engine.spawnEnemy();
+  let enemy = engine.enemies[0], bullet = engine.bullets[0];
+  enemy.health = 2; enemy.y = 200; bullet.x = enemy.x; bullet.y = enemy.y;
+  engine.tick({ deltaMS: 0 });
+  assert.deepEqual(events.splice(0).map(event => event.type), ['shot', 'impact']);
+  engine.fire(); bullet = engine.bullets[0]; bullet.x = enemy.x; bullet.y = enemy.y;
+  engine.tick({ deltaMS: 0 });
+  assert.deepEqual(events.splice(0).map(event => event.type), ['shot', 'impact', 'destroy']);
+  assert.equal(engine.snapshot.score, 100);
+  engine.elapsed = 60; engine.tick({ deltaMS: 0 });
+  assert.deepEqual(events.splice(0), [{ type: 'wave', wave: 4 }]);
+  engine.togglePause(); engine.fire(); engine.tick({ deltaMS: 50 }); engine.togglePause();
+  assert.deepEqual(events.splice(0).map(event => event.type), ['pause', 'resume']);
+  engine.invulnerable = 0; engine.loseLife(); engine.loseLife();
+  assert.deepEqual(events.splice(0).map(event => event.type), ['damage']);
+  engine.snapshot.lives = 1; engine.invulnerable = 0; engine.loseLife();
+  assert.deepEqual(events.splice(0).map(event => event.type), ['damage', 'gameover']);
+  engine.fire(); engine.loseLife(); engine.tick({ deltaMS: 50 });
+  assert.equal(events.length, 0);
+});
+
+test('a failed presentation listener cannot change shooting, scoring or collision outcomes', t => {
+  const engine = new GameEngine(() => {}, () => { throw Error('audio unavailable'); });
+  engine.setupStage(); engine.mounted = true; engine.start();
+  t.after(() => { engine.mounted = false; engine.destroy(); });
+  engine.fire(); engine.spawnEnemy();
+  const enemy = engine.enemies[0], bullet = engine.bullets[0];
+  enemy.y = 200; bullet.x = enemy.x; bullet.y = enemy.y; engine.tick({ deltaMS: 0 });
+  assert.equal(engine.snapshot.score, 100); assert.equal(engine.enemies.length, 0);
+  engine.invulnerable = 0; engine.loseLife(); assert.equal(engine.snapshot.lives, 2);
+});
+
+function game(t, onEvent) {
   const updates = [];
-  const engine = new GameEngine(snapshot => updates.push(snapshot));
+  const engine = new GameEngine(snapshot => updates.push(snapshot), onEvent);
   engine.setupStage();
   engine.mounted = true;
   engine.start();
@@ -202,6 +239,70 @@ test('combat presentation follows real hit/kill/damage/wave events and freezes w
 });
 
 const near = (actual, expected) => assert.ok(Math.abs(actual - expected) < 1e-8, `${actual} != ${expected}`);
+
+test('a near miss produces only a pooled visual cue without damage, score, particles or sound events', t => {
+  const events = [], { engine } = game(t, event => events.push(event));
+  events.length = 0;
+  engine.spawnCooldown = 999; engine.invulnerable = 0;
+  engine.playerX = 450; engine.playerY = 280;
+  engine.spawnEnemy();
+  const enemy = engine.enemies[0];
+  enemy.x = 450 + 17 + enemy.radius + 4; enemy.y = 250; enemy.speed = 100; enemy.wobble = 0;
+  engine.tick({ deltaMS: 0 });
+  let sawNear = false;
+  for (let i = 0; i < 10; i++) {
+    engine.tick({ deltaMS: 50 });
+    sawNear ||= engine.combat.pool.some(effect => effect.kind === 'near' && effect.life > 0);
+  }
+  assert.ok(sawNear);
+  assert.equal(engine.snapshot.lives, 3); assert.equal(engine.snapshot.score, 0);
+  assert.equal(engine.particles.length, 0); assert.equal(engine.enemies.length, 1);
+  assert.deepEqual(events, []);
+  engine.combat.clear();
+  enemy.x = engine.playerX; enemy.y = engine.playerY; engine.tick({ deltaMS: 0 });
+  assert.equal(engine.snapshot.lives, 2); assert.equal(engine.enemies.length, 0);
+  assert.equal(engine.combat.pool.some(effect => effect.kind === 'near' && effect.life > 0), false);
+});
+
+test('a lethal hit uses the existing destruction burst without a duplicate common flash or changed audio/particles', t => {
+  const events = [], { engine } = game(t, event => events.push(event));
+  events.length = 0; engine.spawnCooldown = 999;
+  engine.spawnEnemy(); const enemy = engine.enemies[0]; enemy.health = 2; enemy.x = 200; enemy.y = 200;
+  engine.fire(); let bullet = engine.bullets[0]; bullet.x = enemy.x; bullet.y = enemy.y;
+  engine.tick({ deltaMS: 0 });
+  assert.equal(enemy.health, 1); assert.equal(engine.particles.length, 3);
+  assert.equal(engine.combat.pool.filter(effect => effect.kind === 'impact' && effect.life > 0).length, 1);
+  engine.combat.clear();
+  engine.fire(); bullet = engine.bullets[0]; bullet.x = enemy.x; bullet.y = enemy.y;
+  engine.tick({ deltaMS: 0 });
+  assert.equal(engine.combat.pool.some(effect => effect.kind === 'impact' && effect.life > 0), false);
+  const bursts = engine.combat.pool.filter(effect => effect.kind === 'burst' && effect.life > 0);
+  assert.equal(bursts.length, 1); assert.equal(bursts[0].maxLife, .22);
+  assert.equal(engine.particles.length, 16); assert.equal(engine.snapshot.score, 100);
+  assert.deepEqual(events.map(event => event.type), ['shot', 'impact', 'shot', 'impact', 'destroy']);
+});
+
+test('real pause and Game Over hide indicators and cannot generate new entry/proximity feedback', t => {
+  const { engine } = game(t);
+  engine.spawnCooldown = 999; engine.invulnerable = 0; engine.playerX = 450; engine.playerY = 70;
+  engine.spawnEnemy(); const enemy = engine.enemies[0];
+  enemy.x = 450; enemy.y = -40; enemy.radius = 20; enemy.speed = 100; enemy.wobble = 0;
+  engine.tick({ deltaMS: 0 });
+  assert.equal(engine.combat.indicators.filter(slot => slot.view.visible).length, 1);
+  engine.togglePause();
+  assert.ok(engine.combat.indicators.every(slot => !slot.view.visible));
+  const paused = engine.combat.pool.map(effect => effect.life);
+  engine.tick({ deltaMS: 50 }); assert.deepEqual(engine.combat.pool.map(effect => effect.life), paused);
+  engine.togglePause(); engine.tick({ deltaMS: 0 });
+  assert.equal(engine.combat.indicators.filter(slot => slot.view.visible).length, 1);
+  enemy.x = engine.playerX; enemy.y = engine.playerY; engine.snapshot.lives = 1;
+  engine.tick({ deltaMS: 0 });
+  assert.equal(engine.snapshot.phase, 'gameover');
+  assert.ok(engine.combat.indicators.every(slot => !slot.view.visible));
+  const ended = engine.combat.pool.map(effect => effect.life);
+  engine.tick({ deltaMS: 50 }); assert.deepEqual(engine.combat.pool.map(effect => effect.life), ended);
+  assert.equal(engine.combat.pool.some(effect => ['near', 'entry'].includes(effect.kind) && effect.view.visible), false);
+});
 
 function mouseCanvas(engine, bounds = { left: 0, top: 0, width: 900, height: 560 }) {
   const capture = new Set();
