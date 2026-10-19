@@ -29,12 +29,13 @@ function pixelMap(rows: string[], palette: Palette, pixelSize: number, originY =
   return context;
 }
 
-const SHIP_PALETTE = { o: 0x173763, b: 0x3268bd, c: 0x38d4f1, h: 0xe6fcff, v: 0x8a65ee, m: 0xf365ce };
+const SHIP_PALETTE = { o: 0x173763, b: 0x3268bd, c: 0x38d4f1, h: 0xe6fcff, v: 0x8a65ee, m: 0xf365ce,
+  n: 0x0c1c39, t: 0x197b9d, l: 0x9aebf5 };
 const SHIP = [
-  'h', 'oco', 'oco', 'occco', 'occco', 'obcccbo', 'obhhhbo',
-  'obchhhcbo', 'obchhhcbo', 'obcvhvcbo', 'obccvccbo',
-  'ovobccvccbovo', 'ovcobccvccbocvo', 'ocvcobccvccbocvco',
-  'ohccobccvccboccho', 'obccobccvccboccbo',
+  'h', 'oco', 'olo', 'obhbo', 'obtbo', 'obchcbo', 'obhthbo',
+  'oblnhnlbo', 'obltntlbo', 'obcvcvcbo', 'obccvccbo',
+  'ovobctvtcbovo', 'ovlobctvtcbolvo', 'ocvlobctvtcbolvco',
+  'ohlcobctvtcboclho', 'oblcobcntncboclbo',
   'ovmo..occco..omvo', 'ooo...obcbo...ooo', 'ovvvo', 'mhm',
 ];
 
@@ -77,21 +78,53 @@ function meteorMap(variant: number) {
   const mask = Array.from({ length: 17 }, (_, y) => Array.from({ length: 17 }, (_, x) => {
     const dx = x - 8, dy = y - 8;
     const sector = Math.floor((Math.atan2(dy, dx) + Math.PI) / (Math.PI / 4)) % 8;
+    // The original radial envelope stays intact; only decorative corners change.
+    if (variant === 1 && Math.abs(dx) + Math.abs(dy) > 10.5) return false;
+    if (variant === 2 && Math.abs(dx - dy * .3) > 6.7) return false;
     return Math.hypot(dx, dy) <= radii[sector];
   }));
-  const craters = [[[-3, -2], [3, 3]], [[2, -3], [-3, 2]], [[-2, -3], [3, 1]]][variant];
+  const craters = [[[-3, -2, 1.5], [3, 3, 1]], [[2, -3, 1], [-3, 2, 1.7]], [[-3, -2, 1.2], [2, 3, 1]]][variant];
   return mask.map((row, y) => row.map((inside, x) => {
     if (!inside) return '.';
     const dx = x - 8, dy = y - 8;
     const edge = !mask[y - 1]?.[x] || !mask[y + 1]?.[x] || !row[x - 1] || !row[x + 1];
     if (edge) return dx + dy < -1 ? 'h' : 'o';
-    for (const [cx, cy] of craters) {
+    const fracture = variant === 1 ? dy - Math.floor(dx * .5) : dx - Math.floor(dy * .3) + (variant === 2 ? 1 : 0);
+    const seam = variant === 1 ? Math.abs(dx) < 5 : Math.abs(dy) < 5;
+    if (seam && fracture === 0) return 'o';
+    if (seam && fracture === 1 && (x + y + variant) % 4 === 0) return 'v';
+    if (variant === 2 && Math.abs(dx - 3) + Math.abs(dy + 2) <= 1) return dx === 3 ? 'v' : 'm';
+    for (const [cx, cy, radius] of craters) {
       const distance = Math.hypot(dx - cx, dy - cy);
-      if (distance < 1.6) return 'o';
-      if (distance < 2.6) return dy < cy ? 'd' : 'l';
+      if (distance < radius) return 'o';
+      if (distance < radius + 1) return dy < cy ? 'd' : 'l';
     }
-    if (x === 8 + variant && y >= 7 && y <= 10) return 'm';
+    if ((x * 13 + y * 7 + variant * 11) % 19 === 0) return dx + dy < 0 ? 'l' : 'd';
     return dx + dy < -3 ? 'l' : dx + dy > 5 ? 'd' : 'b';
+  }).join(''));
+}
+
+/** Large, dark color islands with stepped edges; no filters or raster textures. */
+function nebulaMap() {
+  return Array.from({ length: 23 }, (_, y) => Array.from({ length: 49 }, (_, x) => {
+    const dx = (x - 24) / 23, dy = (y - 11) / 8;
+    const bend = dy + Math.sin(x * .18) * .45;
+    const distance = dx * dx + bend * bend;
+    const grain = ((x * 7 + y * 13) % 17) / 17;
+    if (distance > 1 || (distance > .78 && grain < .55)) return '.';
+    return distance > .6 ? 'a' : distance > .42 ? 'v' : distance > .23 || grain > .7 ? 'b' : 'c';
+  }).join(''));
+}
+
+function moonMap() {
+  return Array.from({ length: 33 }, (_, y) => Array.from({ length: 33 }, (_, x) => {
+    const dx = x - 16, dy = y - 16;
+    const distance = Math.hypot(dx, dy);
+    if (distance > 15.5) return '.';
+    const light = dx * .8 - dy * .35;
+    if (distance > 14 && light < -3) return 'r';
+    if (Math.hypot(dx + 6, dy + 4) < 3 || Math.hypot(dx - 2, dy - 7) < 2) return light < -2 ? 'b' : 'd';
+    return light < -4 ? 'l' : light < 4 ? 'b' : 'd';
   }).join(''));
 }
 
@@ -101,9 +134,9 @@ export class PixelArt {
   private flameFrames = FLAMES.map(rows => pixelMap(rows, SHIP_PALETTE, 2, 0));
   private thrusters = new WeakMap<Container, { view: Graphics; power: number }>();
   private meteors = [
-    pixelMap(meteorMap(0), { o: 0x4a2a6d, d: 0x694283, b: 0x9a5cb1, l: 0xc788d8, h: 0xf1c2f3, m: 0xff77c5 }, 2),
-    pixelMap(meteorMap(1), { o: 0x52294f, d: 0x823b79, b: 0xb95396, l: 0xe987c5, h: 0xffcce9, m: 0xb297fa }, 2),
-    pixelMap(meteorMap(2), { o: 0x30386c, d: 0x4c508c, b: 0x7774b8, l: 0xa6aae4, h: 0xd8e9ff, m: 0xe183cf }, 2),
+    pixelMap(meteorMap(0), { o: 0x4a2a6d, d: 0x694283, b: 0x9a5cb1, l: 0xc788d8, h: 0xf1c2f3, m: 0xff77c5, v: 0x9ab2df }, 2),
+    pixelMap(meteorMap(1), { o: 0x52294f, d: 0x823b79, b: 0xb95396, l: 0xe987c5, h: 0xffcce9, m: 0xb297fa, v: 0xe2a1e6 }, 2),
+    pixelMap(meteorMap(2), { o: 0x30386c, d: 0x4c508c, b: 0x7774b8, l: 0xa6aae4, h: 0xd8e9ff, m: 0xe183cf, v: 0xb5d5ec }, 2),
   ];
   private bolt = pixelMap(['..h..', '.chc.', '.bhb.', '.ccc.', '..c..', '.bcb.', '..b..', '.g.g.', '..g..', '..g..'], { h: 0xf0fdff, c: 0x78eaff, b: 0x3a8ebd, g: 0x173552 }, 2);
   private combat = {
@@ -122,6 +155,10 @@ export class PixelArt {
     pixelMap(['.b.', 'bhb', '.b.'], { b: 0x5c96bc, h: 0xc2eafa }, 1),
   ];
   private fragment = pixelMap(['ww', 'ww'], { w: 0xffffff }, 1);
+  private scenery = {
+    nebula: pixelMap(nebulaMap(), { a: 0x101529, v: 0x1b1c38, b: 0x1c2540, c: 0x1e2941 }, 6),
+    moon: pixelMap(moonMap(), { d: 0x101a30, b: 0x17243c, l: 0x24344d, r: 0x35465d }, 2),
+  };
 
   player() {
     const view = new Container({ label: 'Pixel ship' });
@@ -176,6 +213,10 @@ export class PixelArt {
     return new Graphics({ context: this.stars[radius < 1 ? 0 : radius < 1.7 ? 1 : 2], tint: color, alpha, roundPixels: true, label: 'Pixel star' });
   }
 
+  spaceDecoration(kind: 'nebula' | 'moon') {
+    return new Graphics({ context: this.scenery[kind], roundPixels: true, label: `Distant ${kind}` });
+  }
+
   particle(radius: number, color: number) {
     const view = new Graphics({ context: this.fragment, tint: color, roundPixels: true, label: 'Pixel fragment' });
     view.scale.set(Math.round(radius));
@@ -184,6 +225,6 @@ export class PixelArt {
 
   destroy() {
     for (const context of [this.ship, ...this.flameFrames, ...this.meteors, this.bolt, ...this.stars, this.fragment,
-      ...Object.values(this.combat), this.waveWord, ...this.waveDigits]) context.destroy();
+      ...Object.values(this.combat), this.waveWord, ...this.waveDigits, ...Object.values(this.scenery)]) context.destroy();
   }
 }

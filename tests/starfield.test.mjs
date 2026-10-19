@@ -70,7 +70,7 @@ test('resize and compact mode reuse the fixed pool, remap positions and reduce v
   }
   field.resize(1920, 1080, false);
   assert.equal(views.filter(view => view.visible).length, 70);
-  assert.equal(parent.children.length, 3);
+  assert.equal(parent.children.length, field.layers.length + field.scenery.length);
   assert.deepEqual(field.layers.flatMap(layer => layer.stars.map(star => star.view)), views);
   views.forEach((view, i) => {
     assert.equal(view.context, contexts[i]);
@@ -81,12 +81,46 @@ test('resize and compact mode reuse the fixed pool, remap positions and reduce v
 test('scene teardown destroys every star and releases shared contexts with their owner', () => {
   const art = new PixelArt(), parent = new Container();
   const field = new Starfield(art, parent, 900, 560);
-  const views = field.layers.flatMap(layer => layer.stars.map(star => star.view));
+  const views = [...field.layers.flatMap(layer => layer.stars.map(star => star.view)), ...field.scenery.map(item => item.view)];
   const contexts = new Set(views.map(view => view.context));
-  assert.equal(contexts.size, 3);
+  assert.equal(contexts.size, 5);
   parent.destroy({ children: true });
   assert.ok(views.every(view => view.destroyed));
   assert.ok([...contexts].every(context => !context.destroyed));
   art.destroy();
   assert.ok([...contexts].every(context => context.destroyed));
+});
+
+test('distant artwork stays behind stars, reuses geometry on resize and reduces work on mobile', t => {
+  const { field, parent } = scene(t);
+  const views = field.scenery.map(item => item.view);
+  assert.equal(views[0].context, views[1].context);
+  assert.ok(views.every(view => parent.getChildIndex(view) < parent.getChildIndex(field.layers[0].view)));
+  const x = field.scenery[0].x, y = field.scenery[0].y;
+  field.resize(600, 1300, true);
+  assert.ok(Math.abs(field.scenery[0].x - x * 600 / 1920) < 1e-8);
+  assert.ok(Math.abs(field.scenery[0].y - y * 1300 / 1080) < 1e-8);
+  assert.equal(views.filter(view => view.visible).length, 2);
+  for (let i = 0; i < 1000; i++) field.update(.05);
+  field.resize(1920, 1080, false);
+  assert.equal(views.filter(view => view.visible).length, 3);
+  assert.deepEqual(field.scenery.map(item => item.view), views);
+  assert.ok(views.every(view => !view.destroyed && view.roundPixels));
+});
+
+test('decorative drift is frame-rate independent, wraps offscreen and consumes no gameplay RNG', t => {
+  let calls = 0;
+  const { art, parent } = scene(t);
+  const a = new Starfield(art, parent, 900, 560, () => { calls++; return .5; });
+  assert.equal(calls, 70 * 4, 'new artwork does not request additional randomness');
+  const b = new Starfield(art, parent, 900, 560, () => .5);
+  a.scenery.forEach(item => { item.y = 719.99; });
+  b.scenery.forEach(item => { item.y = 719.99; });
+  for (let i = 0; i < 30; i++) a.update(1 / 30);
+  for (let i = 0; i < 144; i++) b.update(1 / 144);
+  a.scenery.forEach((item, i) => {
+    assert.ok(Math.abs(item.y - b.scenery[i].y) < 1e-8);
+    assert.ok(item.y >= -160 && item.y < -160 + item.speed);
+    assert.ok(item.speed < a.layers[0].stars[0].speed);
+  });
 });

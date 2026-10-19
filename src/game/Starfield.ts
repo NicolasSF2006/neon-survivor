@@ -10,15 +10,16 @@ const DEPTHS = [
 
 type Star = { view: Graphics; x: number; y: number; speed: number };
 
-function wrap(value: number, size: number) {
-  if (value >= -PADDING && value <= size + PADDING) return value;
-  const span = size + PADDING * 2;
-  return ((value + PADDING) % span + span) % span - PADDING;
+function wrap(value: number, size: number, padding = PADDING) {
+  if (value >= -padding && value <= size + padding) return value;
+  const span = size + padding * 2;
+  return ((value + padding) % span + span) % span - padding;
 }
 
 /** Decorative coordinates only: no camera transform or gameplay input. */
 export class Starfield {
   readonly layers: { view: Container; stars: Star[] }[] = [];
+  private scenery: { view: Graphics; x: number; y: number; speed: number }[] = [];
   private width: number;
   private height: number;
   private compact = false;
@@ -26,6 +27,19 @@ export class Starfield {
   constructor(art: PixelArt, parent: Container, width: number, height: number, random = Math.random) {
     this.width = width;
     this.height = height;
+    // Fixed background artwork is created once, behind all three star layers.
+    // It never consumes the random stream used by stars or gameplay.
+    for (const [kind, x, y, speed, alpha] of [
+      ['nebula', .18, .35, 2.1, .55],
+      ['nebula', .82, .78, 1.5, .35],
+      ['moon', .84, .22, .6, .65],
+    ] as const) {
+      const view = art.spaceDecoration(kind);
+      view.alpha = alpha;
+      view.position.set(x * width, y * height);
+      parent.addChild(view);
+      this.scenery.push({ view, x: x * width, y: y * height, speed });
+    }
     for (const depth of DEPTHS) {
       const view = new Container({ label: 'Star depth layer' });
       const stars: Star[] = [];
@@ -47,6 +61,11 @@ export class Starfield {
     this.width = width;
     this.height = height;
     this.compact = compact;
+    this.scenery.forEach((item, i) => {
+      item.x *= ratioX; item.y *= ratioY;
+      item.view.position.set(item.x, item.y);
+      item.view.visible = !compact || i !== 1;
+    });
     this.layers.forEach((layer, index) => {
       layer.stars.forEach((star, i) => {
         star.x = wrap(star.x * ratioX, width);
@@ -59,6 +78,12 @@ export class Starfield {
 
   update(dt: number) {
     const elapsed = dt * (this.compact ? .75 : 1);
+    for (const item of this.scenery) {
+      if (!item.view.visible) continue;
+      // A generous offscreen margin hides the entire decorative artwork on wrap.
+      item.y = wrap(item.y + item.speed * elapsed, this.height, 160);
+      item.view.position.set(item.x, item.y);
+    }
     for (const layer of this.layers) {
       for (const star of layer.stars) {
         if (!star.view.visible) continue;

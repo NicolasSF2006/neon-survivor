@@ -112,6 +112,41 @@ test('thruster attack and release match at 30, 60 and 144 FPS', () => {
   art.destroy();
 });
 
+test('refined ship keeps symmetric pixel panels and the existing bounds, pivot and exhaust', () => {
+  const art = new PixelArt(), player = art.player();
+  const body = player.children[0], flame = player.children[1], bounds = body.context.bounds;
+  assert.deepEqual([bounds.minX, bounds.maxX, bounds.minY, bounds.maxY], [-17, 17, -24, 16]);
+  for (const fill of body.context.instructions) {
+    const rectangles = fill.data.path.instructions.filter(item => item.action === 'rect').map(item => item.data.slice(0, 4));
+    for (const [x, y, width, height] of rectangles) {
+      assert.equal(height, 2);
+      // Adjacent pixels may be merged into different runs on the two sides.
+      for (let pixel = x; pixel < x + width; pixel += 2) {
+        const mirror = -pixel - 2;
+        assert.ok(rectangles.some(([rx, ry, rw]) => ry === y && mirror >= rx && mirror < rx + rw));
+      }
+    }
+  }
+  assert.deepEqual([player.pivot.x, player.pivot.y, flame.x, flame.y], [0, 0, 0, 16]);
+  player.destroy({ children: true }); art.destroy();
+});
+
+test('three meteor silhouettes remain bounded and share geometry across instances', () => {
+  const art = new PixelArt();
+  const variants = [14.1, 14.2, 14.3].map(radius => art.meteor(radius));
+  const signatures = new Set(variants.map(view => JSON.stringify(view.context.instructions.map(fill =>
+    fill.data.path.instructions.map(item => item.data.slice(0, 4))))));
+  assert.equal(signatures.size, 3);
+  variants.forEach(view => {
+    const bounds = view.context.bounds;
+    assert.ok(bounds.minX >= -17 && bounds.maxX <= 17 && bounds.minY >= -17 && bounds.maxY <= 17);
+    const sibling = art.meteor(14.1 + variants.indexOf(view) * .1);
+    assert.equal(view.context, sibling.context);
+    sibling.destroy(); view.destroy();
+  });
+  art.destroy();
+});
+
 test('destroying an engine before mounting releases its scene and shared art', () => {
   const engine = new GameEngine(() => {});
   const context = engine.player.children[0].context;
